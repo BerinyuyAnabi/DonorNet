@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "222168882211",
+    "project_id": "donornet-1234",
+    "storage_bucket": "donornet-1234.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:222168882211:android:3fc19840abab1606992596",
+        "android_client_info": {
+          "package_name": "com.donornet.donor_net"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "222168882211-m8hi62989e569ac7nmts3lcuesus7iho.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCY5Eq58S7POgu9oRKiHcaC5Jp_WLFZ2ps"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "222168882211-m8hi62989e569ac7nmts3lcuesus7iho.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "222168882211-8en54mhttj5evifs05i27nhenov2vahu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.donornet.donorNet"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
