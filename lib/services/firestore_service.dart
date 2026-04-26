@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'blood_compatibility.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -65,7 +66,7 @@ class FirestoreService {
     );
   }
 
-  /// Notifies donors with a matching blood type.
+  /// Notifies all compatible donors who can donate to the requested blood type.
   Future<void> _notifyMatchingDonors({
     required String excludeUserId,
     required String bloodType,
@@ -73,30 +74,37 @@ class FirestoreService {
     required String urgency,
   }) async {
     try {
-      final snapshot = await _db
-          .collection('users')
-          .where('bloodType', isEqualTo: bloodType)
-          .get();
+      final compatibleTypes = BloodCompatibility.compatibleDonors(
+          BloodCompatibility.normalize(bloodType));
 
-      if (snapshot.docs.isEmpty) return;
+      if (compatibleTypes.isEmpty) return;
 
       final batch = _db.batch();
-      for (final doc in snapshot.docs) {
-        /// Don't notify the person who created the request
-        if (doc.id == excludeUserId) continue;
 
-        final notifRef = _db.collection('notifications').doc();
-        batch.set(notifRef, {
-          'userId': doc.id,
-          'title': urgency == 'Urgent'
-              ? 'Urgent: $bloodType Blood Needed!'
-              : '$bloodType Blood Request Nearby',
-          'body': '$hospital needs $bloodType donors. Can you help?',
-          'type': urgency == 'Urgent' ? 'urgent' : 'info',
-          'isRead': false,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+      for (final type in compatibleTypes) {
+        final snapshot = await _db
+            .collection('users')
+            .where('bloodType', isEqualTo: type)
+            .get();
+
+        for (final doc in snapshot.docs) {
+          if (doc.id == excludeUserId) continue;
+
+          final notifRef = _db.collection('notifications').doc();
+          batch.set(notifRef, {
+            'userId': doc.id,
+            'title': urgency == 'Urgent'
+                ? 'Urgent: $bloodType Blood Needed!'
+                : '$bloodType Blood Request Nearby',
+            'body':
+                '$hospital needs $bloodType donors. Your blood type ($type) is compatible. Can you help?',
+            'type': urgency == 'Urgent' ? 'urgent' : 'info',
+            'isRead': false,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
       }
+
       await batch.commit();
     } catch (_) {}
   }

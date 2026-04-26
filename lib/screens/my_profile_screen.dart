@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/blood_compatibility.dart';
 
 class _C {
   static const Color pink = Color(0xFFFF4D6D);
@@ -341,22 +342,10 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     final locationCtrl = TextEditingController(text: _location);
 
     final bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-    final bloodLabels = {
-      'A+': 'A Positive (A+)',
-      'A-': 'A Negative (A-)',
-      'B+': 'B Positive (B+)',
-      'B-': 'B Negative (B-)',
-      'AB+': 'AB Positive (AB+)',
-      'AB-': 'AB Negative (AB-)',
-      'O+': 'O Positive (O+)',
-      'O-': 'O Negative (O-)',
-    };
 
-    // Find the current short code from the label
-    String selectedBlood = bloodLabels.entries
-        .firstWhere((e) => e.value == _bloodType,
-            orElse: () => const MapEntry('A+', 'A Positive (A+)'))
-        .key;
+    // Normalize existing blood type to short code for the selector
+    final normalized = BloodCompatibility.normalize(_bloodType);
+    String selectedBlood = bloodTypes.contains(normalized) ? normalized : 'A+';
 
     showModalBottomSheet(
       context: context,
@@ -505,7 +494,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                         final newEmail = emailCtrl.text.trim();
                         final newPhone = phoneCtrl.text.trim();
                         final newLocation = locationCtrl.text.trim();
-                        final newBlood = bloodLabels[selectedBlood]!;
+                        final newBlood = selectedBlood;
 
                         final user = FirebaseAuth.instance.currentUser;
                         if (user != null) {
