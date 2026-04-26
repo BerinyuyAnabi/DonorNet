@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/firestore_service.dart';
 
 // Colors
 class _C {
@@ -11,6 +13,7 @@ class _C {
   static const Color cardBg = Color(0xFFFFFFFF);
   static const Color blue = Color(0xFF5BA8E0);
   static const Color inputBorder = Color(0xFFE8ECF0);
+  static const Color green = Color(0xFF4CAF50);
 }
 
 // Blood type data model
@@ -33,16 +36,12 @@ enum SelectBloodMode { findDonor, search }
 
 class SelectBloodGroupScreen extends StatefulWidget {
   final SelectBloodMode mode;
-  final void Function(BloodType selectedType)? onEmergency;
-  final void Function(BloodType selectedType)? onSchedule;
   final void Function(BloodType selectedType)? onFindDonor;
   final void Function(String query)? onSearch;
 
   const SelectBloodGroupScreen({
     super.key,
     this.mode = SelectBloodMode.findDonor,
-    this.onEmergency,
-    this.onSchedule,
     this.onFindDonor,
     this.onSearch,
   });
@@ -56,16 +55,31 @@ class _SelectBloodGroupScreenState extends State<SelectBloodGroupScreen> {
   int _selectedIndex = -1;
   final _unitController = TextEditingController(text: '~525 mL');
   final _searchController = TextEditingController();
+  final _firestoreService = FirestoreService();
 
   static const _bloodTypes = [
-    BloodType(label: 'A Positive', shortLabel: 'A+', badgeText: 'A\u207A', isFilled: true),
+    BloodType(
+        label: 'A Positive',
+        shortLabel: 'A+',
+        badgeText: 'A\u207A',
+        isFilled: true),
     BloodType(label: 'A Negative', shortLabel: 'A-', badgeText: 'A\u207B'),
-    BloodType(label: 'B Positive', shortLabel: 'B+', badgeText: 'B\u207A', isFilled: true),
+    BloodType(
+        label: 'B Positive',
+        shortLabel: 'B+',
+        badgeText: 'B\u207A',
+        isFilled: true),
     BloodType(label: 'B Negative', shortLabel: 'B-', badgeText: 'B\u207B'),
-    BloodType(label: 'O Positive', shortLabel: 'O+', badgeText: 'O\u207A', isFilled: true),
+    BloodType(
+        label: 'O Positive',
+        shortLabel: 'O+',
+        badgeText: 'O\u207A',
+        isFilled: true),
     BloodType(label: 'O Negative', shortLabel: 'O-', badgeText: 'O\u207B'),
-    BloodType(label: 'AB Positive', shortLabel: 'AB+', badgeText: 'AB\u207A'),
-    BloodType(label: 'AB Negative', shortLabel: 'AB-', badgeText: 'AB\u207B'),
+    BloodType(
+        label: 'AB Positive', shortLabel: 'AB+', badgeText: 'AB\u207A'),
+    BloodType(
+        label: 'AB Negative', shortLabel: 'AB-', badgeText: 'AB\u207B'),
   ];
 
   @override
@@ -73,6 +87,17 @@ class _SelectBloodGroupScreenState extends State<SelectBloodGroupScreen> {
     _unitController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: _C.pink,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
@@ -244,9 +269,11 @@ class _SelectBloodGroupScreenState extends State<SelectBloodGroupScreen> {
       height: 54,
       child: ElevatedButton(
         onPressed: () {
-          if (_selectedIndex >= 0) {
-            widget.onEmergency?.call(_bloodTypes[_selectedIndex]);
+          if (_selectedIndex < 0) {
+            _showError('Please select a blood group first');
+            return;
           }
+          Navigator.pushNamed(context, '/emergency-sos');
         },
         style: ElevatedButton.styleFrom(
           backgroundColor: _C.pink,
@@ -268,9 +295,11 @@ class _SelectBloodGroupScreenState extends State<SelectBloodGroupScreen> {
   Widget _buildScheduleRow() {
     return GestureDetector(
       onTap: () {
-        if (_selectedIndex >= 0) {
-          widget.onSchedule?.call(_bloodTypes[_selectedIndex]);
+        if (_selectedIndex < 0) {
+          _showError('Please select a blood group first');
+          return;
         }
+        _showScheduleSheet(context);
       },
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -302,14 +331,384 @@ class _SelectBloodGroupScreenState extends State<SelectBloodGroupScreen> {
     );
   }
 
+  void _showScheduleSheet(BuildContext context) {
+    final selectedType = _bloodTypes[_selectedIndex];
+    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
+    TimeOfDay selectedTime = const TimeOfDay(hour: 9, minute: 0);
+    int selectedBankIndex = -1;
+    bool loading = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Container(
+              height: MediaQuery.of(ctx).size.height * 0.8,
+              padding: EdgeInsets.fromLTRB(
+                  20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: _C.greyText.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Schedule Donation — ${selectedType.shortLabel}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: _C.darkText,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Date picker
+                  const Text('Select Date',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _C.darkText)),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: ctx,
+                        initialDate: selectedDate,
+                        firstDate: DateTime.now(),
+                        lastDate:
+                            DateTime.now().add(const Duration(days: 90)),
+                      );
+                      if (picked != null) {
+                        setSheetState(() => selectedDate = picked);
+                      }
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _C.cardBg,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: _C.greyText.withValues(alpha: 0.2)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_month_rounded,
+                              color: _C.blue, size: 22),
+                          const SizedBox(width: 12),
+                          Text(
+                            '${selectedDate.day}/${selectedDate.month}/${selectedDate.year}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: _C.darkText,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text('Tap to change',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color:
+                                      _C.greyText.withValues(alpha: 0.6))),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Time picker
+                  const Text('Select Time',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _C.darkText)),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: ctx,
+                        initialTime: selectedTime,
+                      );
+                      if (picked != null) {
+                        setSheetState(() => selectedTime = picked);
+                      }
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _C.cardBg,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: _C.greyText.withValues(alpha: 0.2)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.access_time_rounded,
+                              color: _C.pink, size: 22),
+                          const SizedBox(width: 12),
+                          Text(
+                            selectedTime.format(ctx),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: _C.darkText,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text('Tap to change',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color:
+                                      _C.greyText.withValues(alpha: 0.6))),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Blood bank selector
+                  const Text('Select Blood Bank',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _C.darkText)),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: StreamBuilder(
+                      stream: _firestoreService.getBloodBanks(),
+                      builder: (ctx, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(
+                                color: _C.pink),
+                          );
+                        }
+                        final docs = snapshot.data?.docs ?? [];
+                        if (docs.isEmpty) {
+                          return const Center(
+                            child: Text('No blood banks available',
+                                style: TextStyle(color: _C.greyText)),
+                          );
+                        }
+                        return ListView.separated(
+                          itemCount: docs.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (_, i) {
+                            final bank =
+                                docs[i].data() as Map<String, dynamic>;
+                            final selected = selectedBankIndex == i;
+                            return GestureDetector(
+                              onTap: () => setSheetState(
+                                  () => selectedBankIndex = i),
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? _C.pinkBg
+                                      : _C.cardBg,
+                                  borderRadius:
+                                      BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: selected
+                                        ? _C.pink
+                                        : _C.greyText
+                                            .withValues(alpha: 0.15),
+                                    width: selected ? 1.5 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: selected
+                                            ? _C.pink
+                                            : const Color(0xFFE8F0FE),
+                                        borderRadius:
+                                            BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(
+                                        Icons.local_hospital_rounded,
+                                        size: 20,
+                                        color: selected
+                                            ? Colors.white
+                                            : _C.blue,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            bank['name'] ?? '',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: selected
+                                                  ? _C.pink
+                                                  : _C.darkText,
+                                            ),
+                                          ),
+                                          Text(
+                                            '${bank['address']} · ${bank['openHours']}',
+                                            style: const TextStyle(
+                                                fontSize: 11,
+                                                color: _C.greyText),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (selected)
+                                      const Icon(
+                                          Icons.check_circle_rounded,
+                                          color: _C.pink,
+                                          size: 22),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Confirm button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: loading
+                          ? null
+                          : () async {
+                              if (selectedBankIndex < 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: const Text(
+                                        'Please select a blood bank'),
+                                    backgroundColor: _C.pink,
+                                    behavior: SnackBarBehavior.floating,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                  ),
+                                );
+                                return;
+                              }
+
+                              setSheetState(() => loading = true);
+
+                              final user =
+                                  FirebaseAuth.instance.currentUser;
+                              if (user == null) return;
+
+                              final docs = (await _firestoreService
+                                      .getBloodBanks()
+                                      .first)
+                                  .docs;
+                              final bank = docs[selectedBankIndex].data()
+                                  as Map<String, dynamic>;
+                              final bankName =
+                                  bank['name'] ?? 'Blood Bank';
+
+                              final appointmentDateTime = DateTime(
+                                selectedDate.year,
+                                selectedDate.month,
+                                selectedDate.day,
+                                selectedTime.hour,
+                                selectedTime.minute,
+                              );
+
+                              await _firestoreService.scheduleAppointment(
+                                userId: user.uid,
+                                bloodBankName: bankName,
+                                dateTime: appointmentDateTime,
+                                donationType:
+                                    '${selectedType.shortLabel} Blood Donation',
+                              );
+
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        'Appointment scheduled at $bankName!'),
+                                    backgroundColor: _C.green,
+                                    behavior: SnackBarBehavior.floating,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                  ),
+                                );
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _C.blue,
+                        foregroundColor: Colors.white,
+                        elevation: 4,
+                        shadowColor: _C.blue.withValues(alpha: 0.35),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(26),
+                        ),
+                      ),
+                      child: loading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2.5),
+                            )
+                          : const Text('Confirm Appointment',
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildFindDonorButton() {
     return SizedBox(
       height: 46,
       child: OutlinedButton(
         onPressed: () {
-          if (_selectedIndex >= 0) {
-            widget.onFindDonor?.call(_bloodTypes[_selectedIndex]);
+          if (_selectedIndex < 0) {
+            _showError('Please select a blood group first');
+            return;
           }
+          widget.onFindDonor?.call(_bloodTypes[_selectedIndex]);
           Navigator.pushNamed(context, '/nearby-donors');
         },
         style: OutlinedButton.styleFrom(
@@ -401,7 +800,8 @@ class _BloodTypeCard extends StatelessWidget {
         color: isSelected ? _C.pinkBg : Colors.transparent,
         borderRadius: BorderRadius.circular(14),
         border: isSelected
-            ? Border.all(color: _C.pinkLight.withValues(alpha: 0.3), width: 1.5)
+            ? Border.all(
+                color: _C.pinkLight.withValues(alpha: 0.3), width: 1.5)
             : null,
       ),
       child: Column(
@@ -484,14 +884,16 @@ class _BloodDropIconPainter extends CustomPainter {
       ..strokeWidth = 1.8;
 
     paint.color = _C.pinkLight;
-    final outerPath = _dropPath(size, Offset(size.width * 0.5, size.height * 0.5), 0.9);
+    final outerPath = _dropPath(
+        size, Offset(size.width * 0.5, size.height * 0.5), 0.9);
     canvas.drawPath(outerPath, paint);
 
     if (isFilled) {
       final innerPaint = Paint()
         ..color = _C.pink
         ..style = PaintingStyle.fill;
-      final innerPath = _dropPath(size, Offset(size.width * 0.5, size.height * 0.55), 0.55);
+      final innerPath = _dropPath(
+          size, Offset(size.width * 0.5, size.height * 0.55), 0.55);
       canvas.drawPath(innerPath, innerPaint);
     }
   }
@@ -507,8 +909,10 @@ class _BloodDropIconPainter extends CustomPainter {
     final bottom = Offset(cx, cy + h * 0.35);
 
     path.moveTo(top.dx, top.dy);
-    path.quadraticBezierTo(cx + w * 0.55, cy + h * 0.05, bottom.dx, bottom.dy);
-    path.quadraticBezierTo(cx - w * 0.55, cy + h * 0.05, top.dx, top.dy);
+    path.quadraticBezierTo(
+        cx + w * 0.55, cy + h * 0.05, bottom.dx, bottom.dy);
+    path.quadraticBezierTo(
+        cx - w * 0.55, cy + h * 0.05, top.dx, top.dy);
     path.close();
     return path;
   }

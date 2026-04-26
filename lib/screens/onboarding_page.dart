@@ -45,10 +45,8 @@ class OnboardingPage extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
 // ILLUSTRATION 1: Find Donors
 // A radar/search visual with donor avatars orbiting around a center pin
-// ═══════════════════════════════════════════════════════════════════
 class _FindDonorsIllustration extends StatelessWidget {
   const _FindDonorsIllustration();
 
@@ -196,10 +194,8 @@ class _FindDonorsIllustration extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
 // ILLUSTRATION 2: Quick & Safe
 // A shield with a check mark and safety elements
-// ═══════════════════════════════════════════════════════════════════
 class _SafeTestingIllustration extends StatelessWidget {
   const _SafeTestingIllustration();
 
@@ -332,10 +328,8 @@ class _SafeTestingIllustration extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
 // ILLUSTRATION 3: Save Lives
 // A heart with blood drop and "3 lives" visual
-// ═══════════════════════════════════════════════════════════════════
 class _DonatedIllustration extends StatelessWidget {
   const _DonatedIllustration();
 

@@ -2,17 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 
-/// ROLE SELECTION SCREEN
-///
-/// Shown right after sign-up (or when an existing user has no role set).
-/// The user picks one of two roles:
-///
-///   "I'm a Donor"     → sees incoming requests, can respond, track donations
-///   "I Need Blood"    → can post requests, search for donors, find blood banks
-///
-/// The role is saved to their Firestore profile as 'donor' or 'requester'.
-/// The home screen reads this role and shows different content accordingly.
-
 class _C {
   static const Color pink = Color(0xFFFF4D6D);
 

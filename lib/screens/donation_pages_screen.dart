@@ -20,9 +20,7 @@ class C {
   static const green = Color(0xFF4CAF50);
 }
 
-// ═══════════════════════════════════════════════════════════════════
 // MAIN DONATION FLOW — step-by-step wizard
-// ═══════════════════════════════════════════════════════════════════
 class DonationPagesScreen extends StatefulWidget {
   const DonationPagesScreen({super.key});
   @override
@@ -1354,9 +1352,7 @@ class _DonationPagesScreenState extends State<DonationPagesScreen> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
 // SHARED HELPERS
-// ═══════════════════════════════════════════════════════════════════
 Widget _circle(double size, Color color) {
   return Container(
     width: size, height: size,

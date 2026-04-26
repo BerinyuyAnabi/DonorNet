@@ -13,6 +13,7 @@ class AuthService {
     required String name,
     required String email,
     required String password,
+    String dob = '',
   }) async {
     final credential = await _auth.createUserWithEmailAndPassword(
       email: email,
@@ -27,7 +28,7 @@ class AuthService {
       'email': email,
       'phone': '',
       'location': '',
-      'dob': '',
+      'dob': dob,
       'bloodType': '',
       'bloodTypeVerified': false,
       'photoUrl': '',

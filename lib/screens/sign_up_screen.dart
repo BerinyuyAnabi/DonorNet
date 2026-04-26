@@ -51,14 +51,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return age;
   }
 
-  /// SIGN UP FLOW:
-  /// 1. Validate inputs (name, email, passwords match)
-  /// 2. Call AuthService.signUp() which:
-  ///    a. Creates an account in Firebase Auth (email + password)
-  ///    b. Saves the user's profile to Firestore (name, email, etc.)
-  /// 3. On success: navigate to home. Firebase auth state changes automatically,
-  ///    so the StreamBuilder in main.dart will also detect the logged-in user.
-  /// 4. On error: show a user-friendly message (e.g. "email already in use").
   Future<void> _handleSignUp() async {
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
@@ -94,7 +86,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     try {
       // This calls Firebase Auth + Firestore (see auth_service.dart)
-      await _authService.signUp(name: name, email: email, password: password);
+      final dobStr = '${_dob!.day}/${_dob!.month}/${_dob!.year}';
+      await _authService.signUp(
+          name: name, email: email, password: password, dob: dobStr);
 
       // Navigate to role selection — new users always need to pick a role
       if (mounted) {

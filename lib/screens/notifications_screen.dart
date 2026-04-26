@@ -3,15 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/firestore_service.dart';
 
-/// NOTIFICATIONS SCREEN — now reads from Firestore.
-///
-/// HOW IT WORKS:
-/// 1. When something happens (donation, blood request), the service creates
-///    a document in the "notifications" collection with the user's ID.
-/// 2. This screen uses StreamBuilder to listen for that user's notifications.
-/// 3. "Mark all read" updates every unread notification in one batch write.
-/// 4. Notifications are grouped by date (Today, Yesterday, Earlier).
-
 class _C {
   static const Color pink = Color(0xFFFF4D6D);
   static const Color pinkBg = Color(0xFFFFF0F3);
@@ -38,10 +29,8 @@ class NotificationsScreen extends StatelessWidget {
     final user = FirebaseAuth.instance.currentUser;
     final firestoreService = FirestoreService();
 
-    return Scaffold(
-      backgroundColor: _C.background,
-      body: SafeArea(
-        child: Column(
+    return SafeArea(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Title row
@@ -170,8 +159,7 @@ class NotificationsScreen extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 
   /// Groups notifications into sections: Today, Yesterday, Earlier.

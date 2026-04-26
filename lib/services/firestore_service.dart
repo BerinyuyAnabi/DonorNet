@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FirestoreService {
@@ -100,32 +101,64 @@ class FirestoreService {
     } catch (_) {}
   }
 
-  /// Marks a blood request as fulfilled and notifies the requester.
-  Future<void> fulfillBloodRequest(String requestId) async {
+  /// Records a donor's response to a blood request.
+  /// Saves who responded, their blood type, phone, and chosen arrival time.
+  /// Marks the request as fulfilled and notifies the requester.
+  Future<void> respondToBloodRequest({
+    required String requestId,
+    required String donorId,
+    required String donorName,
+    required String donorBloodType,
+    required String donorPhone,
+    required DateTime arrivalTime,
+  }) async {
     final doc = await _db.collection('blood_requests').doc(requestId).get();
     final data = doc.data();
+    if (data == null) return;
 
+    final hour = arrivalTime.hour;
+    final minute = arrivalTime.minute.toString().padLeft(2, '0');
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    final arrivalStr = '$displayHour:$minute $period';
+
+    // Save the donor response on the request document
     await _db.collection('blood_requests').doc(requestId).update({
       'urgency': 'Fulfilled',
       'status': 'fulfilled',
+      'respondedBy': donorId,
+      'respondedByName': donorName,
+      'respondedByBloodType': donorBloodType,
+      'respondedByPhone': donorPhone,
+      'arrivalTime': arrivalStr,
+      'respondedAt': FieldValue.serverTimestamp(),
     });
 
-    if (data != null) {
-      try {
-        final userId = data['userId'] as String?;
-        final bloodType = data['bloodType'] ?? '';
-        final hospital = data['hospital'] ?? '';
-        if (userId != null) {
-          await createNotification(
-            userId: userId,
-            title: 'Donor Found!',
-            body:
-                'A donor has responded to your $bloodType request at $hospital. Your request has been fulfilled!',
-            type: 'donation',
-          );
-        }
-      } catch (_) {}
+    // Notify the requester with donor details
+    final requesterId = data['userId'] as String?;
+    final bloodType = data['bloodType'] ?? '';
+    final hospital = data['hospital'] ?? '';
+    if (requesterId != null) {
+      await createNotification(
+        userId: requesterId,
+        title: 'Donor Found!',
+        body:
+            '$donorName ($donorBloodType) has responded to your $bloodType request at $hospital. '
+            'They will arrive at $arrivalStr. '
+            'Contact: $donorPhone',
+        type: 'donation',
+      );
     }
+
+    // Confirm to the donor
+    await createNotification(
+      userId: donorId,
+      title: 'Response Confirmed',
+      body:
+          'You\'ve pledged to donate $donorBloodType at $hospital by $arrivalStr. '
+          'Thank you for saving a life!',
+      type: 'donation',
+    );
   }
 
   /// DONORS
@@ -301,12 +334,14 @@ class FirestoreService {
     final snapshot = await _db
         .collection('notifications')
         .where('userId', isEqualTo: userId)
-        .where('isRead', isEqualTo: false)
         .get();
 
     final batch = _db.batch();
     for (final doc in snapshot.docs) {
-      batch.update(doc.reference, {'isRead': true});
+      final data = doc.data();
+      if (data['isRead'] == false) {
+        batch.update(doc.reference, {'isRead': true});
+      }
     }
     await batch.commit();
   }
@@ -435,5 +470,142 @@ class FirestoreService {
         .where('dateTime', isGreaterThanOrEqualTo: Timestamp.now())
         .orderBy('dateTime')
         .snapshots();
+  }
+
+  /// EMERGENCY SOS
+
+  /// Broadcasts an emergency blood request to all compatible donors.
+  /// Uses blood compatibility to notify donors with matching types.
+  Future<void> sendEmergencySOS({
+    required String userId,
+    required String name,
+    required String bloodType,
+    required String hospital,
+    required String location,
+    required double latitude,
+    required double longitude,
+    required List<String> compatibleTypes,
+  }) async {
+    await _db.collection('blood_requests').add({
+      'userId': userId,
+      'name': name,
+      'bloodType': bloodType,
+      'hospital': hospital,
+      'location': location,
+      'latitude': latitude,
+      'longitude': longitude,
+      'urgency': 'Emergency',
+      'unitsNeeded': 1,
+      'status': 'active',
+      'isEmergency': true,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    await createNotification(
+      userId: userId,
+      title: 'Emergency SOS Sent',
+      body: 'Your emergency $bloodType request has been broadcast to nearby compatible donors.',
+      type: 'urgent',
+    );
+
+    try {
+      final batch = _db.batch();
+      for (final type in compatibleTypes) {
+        final donors = await _db
+            .collection('users')
+            .where('bloodType', isEqualTo: type)
+            .get();
+
+        for (final doc in donors.docs) {
+          if (doc.id == userId) continue;
+          final notifRef = _db.collection('notifications').doc();
+          batch.set(notifRef, {
+            'userId': doc.id,
+            'title': 'EMERGENCY: $bloodType Blood Needed!',
+            'body': '$name needs $bloodType blood urgently at $hospital, $location. Tap to respond.',
+            'type': 'urgent',
+            'isRead': false,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      await batch.commit();
+    } catch (_) {}
+  }
+
+  /// GPS / LOCATION
+
+  /// Updates a user's location coordinates.
+  Future<void> updateUserLocation({
+    required String userId,
+    required double latitude,
+    required double longitude,
+    required String locationName,
+  }) async {
+    await _db.collection('users').doc(userId).set({
+      'latitude': latitude,
+      'longitude': longitude,
+      'location': locationName,
+    }, SetOptions(merge: true));
+  }
+
+  /// Fetches donors who have location data.
+  Future<List<QueryDocumentSnapshot>> getNearbyDonors({
+    required double latitude,
+    required double longitude,
+    double radiusKm = 10.0,
+  }) async {
+    final snapshot = await _db
+        .collection('users')
+        .where('bloodType', isNotEqualTo: '')
+        .get();
+
+    final donors = <QueryDocumentSnapshot>[];
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final lat = data['latitude'] as double?;
+      final lng = data['longitude'] as double?;
+      if (lat == null || lng == null) continue;
+
+      final distance = _haversine(latitude, longitude, lat, lng);
+      if (distance <= radiusKm) {
+        donors.add(doc);
+      }
+    }
+    return donors;
+  }
+
+  /// Haversine formula — calculates distance between two GPS points in km.
+  double _haversine(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371.0;
+    final dLat = _toRad(lat2 - lat1);
+    final dLon = _toRad(lon2 - lon1);
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_toRad(lat1)) * cos(_toRad(lat2)) * sin(dLon / 2) * sin(dLon / 2);
+    return r * 2 * atan2(sqrt(a), sqrt(1 - a));
+  }
+
+  double _toRad(double deg) => deg * (3.141592653589793 / 180);
+
+  /// DONATION STREAKS
+
+  /// Gets the donation count for a user in the current year.
+  Future<int> getDonationCountThisYear(String userId) async {
+    final startOfYear = DateTime(DateTime.now().year, 1, 1);
+    final snapshot = await _db
+        .collection('donations')
+        .where('userId', isEqualTo: userId)
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfYear))
+        .get();
+    return snapshot.docs.length;
+  }
+
+  /// Gets the total donation count for a user (all time).
+  Future<int> getTotalDonationCount(String userId) async {
+    final snapshot = await _db
+        .collection('donations')
+        .where('userId', isEqualTo: userId)
+        .get();
+    return snapshot.docs.length;
   }
 }

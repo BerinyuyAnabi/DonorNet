@@ -71,7 +71,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     }
   }
 
-  /// Pick a photo from gallery/camera and upload to Firebase Storage.
   Future<void> _pickAndUploadPhoto() async {
     final picker = ImagePicker();
     final picked = await picker.pickImage(
@@ -98,11 +97,11 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       // Save URL to Firestore
       await _authService.updateUserProfile(user.uid, {'photoUrl': url});
       if (mounted) setState(() => _photoUrl = url);
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Could not upload photo'),
+            content: Text('Could not upload photo: $e'),
             backgroundColor: _C.pink,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
@@ -118,18 +117,13 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF5F7FA),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFFFF4D6D))),
-      );
+      return const Center(child: CircularProgressIndicator(color: Color(0xFFFF4D6D)));
     }
-    return Scaffold(
-      backgroundColor: _C.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const ClampingScrollPhysics(),
-          child: Column(
-            children: [
+    return SafeArea(
+      child: SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: Column(
+          children: [
               const SizedBox(height: 16),
 
               // Title
@@ -313,10 +307,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
 
               const SizedBox(height: 24),
 
-              _buildDonationStats(),
-
-              const SizedBox(height: 24),
-
               // Personal info section
               _sectionHeader('Personal Information'),
               _infoTile(Icons.person_outline_rounded, 'Full Name', _name),
@@ -340,8 +330,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 
   // Edit Profile Bottom Sheet
@@ -350,7 +339,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     final emailCtrl = TextEditingController(text: _email);
     final phoneCtrl = TextEditingController(text: _phone);
     final locationCtrl = TextEditingController(text: _location);
-    final dobCtrl = TextEditingController(text: _dob);
 
     final bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
     final bloodLabels = {
@@ -460,13 +448,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                             label: 'Location',
                             controller: locationCtrl,
                           ),
-                          const SizedBox(height: 14),
-                          _editField(
-                            icon: Icons.cake_outlined,
-                            label: 'Date of Birth',
-                            controller: dobCtrl,
-                          ),
-
                           const SizedBox(height: 22),
 
                           // Blood type selector
@@ -524,7 +505,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                         final newEmail = emailCtrl.text.trim();
                         final newPhone = phoneCtrl.text.trim();
                         final newLocation = locationCtrl.text.trim();
-                        final newDob = dobCtrl.text.trim();
                         final newBlood = bloodLabels[selectedBlood]!;
 
                         final user = FirebaseAuth.instance.currentUser;
@@ -534,7 +514,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                             'email': newEmail,
                             'phone': newPhone,
                             'location': newLocation,
-                            'dob': newDob,
                             'bloodType': newBlood,
                           });
                         }
@@ -544,7 +523,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                           _email = newEmail;
                           _phone = newPhone;
                           _location = newLocation;
-                          _dob = newDob;
                           _bloodType = newBlood;
                         });
 
@@ -709,42 +687,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     );
   }
 
-  Widget _buildDonationStats() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return const SizedBox();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: StreamBuilder<QuerySnapshot>(
-        stream: _firestoreService.getDonationHistory(user.uid),
-        builder: (context, snapshot) {
-          final count = snapshot.hasError ? 0 : (snapshot.data?.docs.length ?? 0);
-          final livesSaved = count * 3;
-
-          return Row(
-            children: [
-              _statCard(
-                icon: Icons.water_drop_rounded,
-                value: '$count',
-                label: 'Total\nDonations',
-                color: _C.pink,
-                bg: _C.pinkBg,
-              ),
-              const SizedBox(width: 12),
-              _statCard(
-                icon: Icons.favorite_rounded,
-                value: '$livesSaved',
-                label: 'Lives\nSaved',
-                color: _C.green,
-                bg: _C.greenBg,
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   Widget _buildDonationHistory() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const SizedBox();
@@ -806,65 +748,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       'July', 'August', 'September', 'October', 'November', 'December',
     ];
     return '${months[date.month]} ${date.day}, ${date.year}';
-  }
-
-  // Shared Widgets
-
-  Widget _statCard({
-    required IconData icon,
-    required String value,
-    required String label,
-    required Color color,
-    required Color bg,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        decoration: BoxDecoration(
-          color: _C.cardBg,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: bg,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 20, color: color),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 11,
-                color: _C.greyText,
-                height: 1.3,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _sectionHeader(String title) {

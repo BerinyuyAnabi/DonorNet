@@ -2,10 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/firestore_service.dart';
+import '../services/location_service.dart';
 
 import 'my_profile_screen.dart';
 import 'settings_screen.dart';
 import 'notifications_screen.dart';
+import 'blood_request_screen.dart';
+import 'blood_bank_screen.dart';
+import 'blood_drives_screen.dart';
+import 'donation_pages_screen.dart';
+import 'emergency_sos_screen.dart';
+import 'select_blood_group_screen.dart';
+import 'donor_loader.dart';
+import 'donor_data.dart';
+import 'profile_screen.dart';
 
 // App Colors
 class _C {
@@ -32,27 +42,94 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentNavIndex = 0;
-
-  final _pages = const [
-    _UnifiedHomeFeed(),
-    MyProfileScreen(),
-    SizedBox(), // placeholder for center FAB
-    SettingsScreen(),
-    NotificationsScreen(),
-  ];
+  final GlobalKey<NavigatorState> _nestedNavKey = GlobalKey<NavigatorState>();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _C.background,
-      body: IndexedStack(
-        index: _currentNavIndex,
-        children: _pages,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_currentNavIndex == 0 &&
+            (_nestedNavKey.currentState?.canPop() ?? false)) {
+          _nestedNavKey.currentState!.pop();
+        } else if (_currentNavIndex != 0) {
+          setState(() => _currentNavIndex = 0);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: _C.background,
+        body: _buildBody(),
+        bottomNavigationBar: _buildBottomNav(),
+        floatingActionButton: _buildFab(),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       ),
-      bottomNavigationBar: _buildBottomNav(),
-      floatingActionButton: _buildFab(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
     );
+  }
+
+  Route<dynamic> _onGenerateRoute(RouteSettings settings) {
+    Widget page;
+    switch (settings.name) {
+      case '/select-blood':
+        page = const SelectBloodGroupScreen();
+        break;
+      case '/nearby-donors':
+        page = const NearbyDonorLoader();
+        break;
+      case '/all-donators':
+        page = const AllDonatorsLoader();
+        break;
+      case '/profile':
+        final args = settings.arguments;
+        final donor = (args is DonorData) ? args : null;
+        page = ProfileScreen(donor: donor);
+        break;
+      case '/donation-pages':
+        page = const DonationPagesScreen();
+        break;
+      case '/blood-request':
+        page = const BloodRequestScreen();
+        break;
+      case '/blood-bank':
+        page = const BloodBankScreen();
+        break;
+      case '/blood-drives':
+        page = const BloodDrivesScreen();
+        break;
+      case '/emergency-sos':
+        page = const EmergencySOSScreen();
+        break;
+      default:
+        page = const _UnifiedHomeFeed();
+    }
+    return MaterialPageRoute(builder: (_) => page, settings: settings);
+  }
+
+  void _navigateToFeature(String route) {
+    if (_currentNavIndex != 0) {
+      setState(() => _currentNavIndex = 0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _nestedNavKey.currentState?.pushNamed(route);
+      });
+    } else {
+      _nestedNavKey.currentState?.pushNamed(route);
+    }
+  }
+
+  Widget _buildBody() {
+    switch (_currentNavIndex) {
+      case 1:
+        return const MyProfileScreen();
+      case 3:
+        return const SettingsScreen();
+      case 4:
+        return const NotificationsScreen();
+      default:
+        return Navigator(
+          key: _nestedNavKey,
+          onGenerateRoute: _onGenerateRoute,
+        );
+    }
   }
 
   Widget _buildBottomNav() {
@@ -70,7 +147,14 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.home_outlined,
               activeIcon: Icons.home,
               isActive: _currentNavIndex == 0,
-              onTap: () => setState(() => _currentNavIndex = 0),
+              onTap: () {
+                if (_currentNavIndex == 0) {
+                  _nestedNavKey.currentState
+                      ?.popUntil((route) => route.isFirst);
+                } else {
+                  setState(() => _currentNavIndex = 0);
+                }
+              },
             ),
             _NavItem(
               icon: Icons.person_outline,
@@ -85,11 +169,24 @@ class _HomeScreenState extends State<HomeScreen> {
               isActive: _currentNavIndex == 3,
               onTap: () => setState(() => _currentNavIndex = 3),
             ),
-            _NavItem(
-              icon: Icons.notifications_none,
-              activeIcon: Icons.notifications,
-              isActive: _currentNavIndex == 4,
-              onTap: () => setState(() => _currentNavIndex = 4),
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseAuth.instance.currentUser != null
+                  ? FirebaseFirestore.instance
+                      .collection('notifications')
+                      .where('userId', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
+                      .where('isRead', isEqualTo: false)
+                      .snapshots()
+                  : const Stream.empty(),
+              builder: (context, snapshot) {
+                final hasUnread = (snapshot.data?.docs.length ?? 0) > 0;
+                return _NavItem(
+                  icon: Icons.notifications_none,
+                  activeIcon: Icons.notifications,
+                  isActive: _currentNavIndex == 4,
+                  showBadge: hasUnread,
+                  onTap: () => setState(() => _currentNavIndex = 4),
+                );
+              },
             ),
           ],
         ),
@@ -130,15 +227,18 @@ class _HomeScreenState extends State<HomeScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (ctx) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+        padding: EdgeInsets.fromLTRB(
+            20, 24, 20, MediaQuery.of(ctx).padding.bottom + 20),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
             Container(
               width: 40, height: 4,
               decoration: BoxDecoration(
@@ -158,7 +258,7 @@ class _HomeScreenState extends State<HomeScreen> {
               color: _C.pink,
               onTap: () {
                 Navigator.pop(ctx);
-                Navigator.pushNamed(context, '/donation-pages');
+                _navigateToFeature('/donation-pages');
               },
             ),
             const SizedBox(height: 12),
@@ -169,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
               color: _C.blue,
               onTap: () {
                 Navigator.pop(ctx);
-                Navigator.pushNamed(context, '/select-blood');
+                _navigateToFeature('/select-blood');
               },
             ),
             const SizedBox(height: 12),
@@ -180,10 +280,22 @@ class _HomeScreenState extends State<HomeScreen> {
               color: const Color(0xFFFF9B50),
               onTap: () {
                 Navigator.pop(ctx);
-                Navigator.pushNamed(context, '/blood-request');
+                _navigateToFeature('/blood-request');
+              },
+            ),
+            const SizedBox(height: 12),
+            _actionTile(
+              icon: Icons.emergency_rounded,
+              title: 'Emergency SOS',
+              subtitle: 'Broadcast an urgent alert to nearby donors',
+              color: const Color(0xFFE53935),
+              onTap: () {
+                Navigator.pop(ctx);
+                _navigateToFeature('/emergency-sos');
               },
             ),
           ],
+        ),
         ),
       ),
     );
@@ -236,23 +348,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
 // SHARED WIDGETS
-// ═══════════════════════════════════════════════════════════════════
 
-Widget _buildTopBar(BuildContext context) {
+Widget _buildTopBar(BuildContext context, String location) {
   return Padding(
     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
     child: Row(
       children: [
         const Icon(Icons.location_on_outlined, color: _C.pink, size: 22),
         const SizedBox(width: 6),
-        const Text(
-          'Accra',
-          style: TextStyle(
-            fontSize: 16,
-            color: _C.pink,
-            fontWeight: FontWeight.w600,
+        Flexible(
+          child: Text(
+            location,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 16,
+              color: _C.pink,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         const Spacer(),
@@ -322,6 +435,7 @@ Widget _buildStatCards() {
           child: StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('donations')
+                .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
                 .snapshots(),
             builder: (context, snapshot) {
               final donations = snapshot.hasError ? 0 : (snapshot.data?.docs.length ?? 0);
@@ -372,13 +486,64 @@ Widget _buildStatCards() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════
 // UNIFIED HOME FEED
 // Shows: hero, stats, 4 feature cards, live request feed,
 // and the user's own posted requests
-// ═══════════════════════════════════════════════════════════════════
-class _UnifiedHomeFeed extends StatelessWidget {
+class _UnifiedHomeFeed extends StatefulWidget {
   const _UnifiedHomeFeed();
+
+  @override
+  State<_UnifiedHomeFeed> createState() => _UnifiedHomeFeedState();
+}
+
+class _UnifiedHomeFeedState extends State<_UnifiedHomeFeed> {
+  String _location = 'Detecting...';
+  final LocationService _locationService = LocationService();
+  final FirestoreService _firestoreService = FirestoreService();
+
+  @override
+  void initState() {
+    super.initState();
+    _detectLocation();
+  }
+
+  Future<void> _detectLocation() async {
+    final result = await _locationService.getCurrentPositionWithStatus();
+    if (result.position != null) {
+      final address = await _locationService.getAddressFromCoordinates(
+        result.position!.latitude,
+        result.position!.longitude,
+      );
+      if (mounted) {
+        setState(() => _location = address);
+        // Save location to Firestore so nearby donors feature works
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          _firestoreService.updateUserLocation(
+            userId: uid,
+            latitude: result.position!.latitude,
+            longitude: result.position!.longitude,
+            locationName: address,
+          );
+        }
+      }
+    } else {
+      if (mounted) {
+        setState(() => _location = 'Location unavailable');
+        if (result.error != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result.error!),
+              backgroundColor: _C.pink,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -390,7 +555,7 @@ class _UnifiedHomeFeed extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildTopBar(context),
+            _buildTopBar(context, _location),
             // Hero
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -528,7 +693,17 @@ class _UnifiedHomeFeed extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 16),
-                      const Expanded(child: SizedBox()),
+                      Expanded(
+                        child: _FeatureCard(
+                          icon: Icons.emergency_rounded,
+                          iconBgColor: const Color(0xFFFFEBEE),
+                          iconColor: const Color(0xFFE53935),
+                          title: 'Emergency',
+                          badge: 'SOS',
+                          badgeColor: const Color(0xFFE53935),
+                          onTap: () => Navigator.pushNamed(context, '/emergency-sos'),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -794,12 +969,14 @@ class _NavItem extends StatelessWidget {
   final IconData activeIcon;
   final bool isActive;
   final VoidCallback onTap;
+  final bool showBadge;
 
   const _NavItem({
     required this.icon,
     required this.activeIcon,
     required this.isActive,
     required this.onTap,
+    this.showBadge = false,
   });
 
   @override
@@ -809,10 +986,30 @@ class _NavItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: SizedBox(
         width: 48,
-        child: Icon(
-          isActive ? activeIcon : icon,
-          color: isActive ? _C.pink : _C.greyText,
-          size: 26,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Center(
+              child: Icon(
+                isActive ? activeIcon : icon,
+                color: isActive ? _C.pink : _C.greyText,
+                size: 26,
+              ),
+            ),
+            if (showBadge)
+              Positioned(
+                right: 8,
+                top: -2,
+                child: Container(
+                  width: 10,
+                  height: 10,
+                  decoration: const BoxDecoration(
+                    color: _C.pink,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

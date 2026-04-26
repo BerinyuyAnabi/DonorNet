@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'auth_widgets.dart';
+import 'sign_up_screen.dart';
 import '../services/auth_service.dart';
 
 class SignInScreen extends StatefulWidget {
@@ -22,12 +23,6 @@ class _SignInScreenState extends State<SignInScreen> {
     super.dispose();
   }
 
-  /// SIGN IN FLOW:
-  /// 1. Takes email + password from the text fields
-  /// 2. Sends them to Firebase Auth via AuthService
-  /// 3. Firebase checks credentials — if valid, returns the user
-  /// 4. On success: navigate to home (auth state also updates automatically)
-  /// 5. On error: show message like "wrong password" or "user not found"
   Future<void> _handleSignIn() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
@@ -59,38 +54,40 @@ class _SignInScreenState extends State<SignInScreen> {
   }
 
   Future<void> _handleForgotPassword() async {
-    final controller = TextEditingController();
+    String enteredEmail = '';
     final email = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Reset Password',
-            style: TextStyle(fontWeight: FontWeight.w700)),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.emailAddress,
-          decoration: InputDecoration(
-            hintText: 'Enter your email',
-            enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: AppColors.pink.withValues(alpha: 0.3))),
-            focusedBorder: const UnderlineInputBorder(
-                borderSide: BorderSide(color: AppColors.pink, width: 2)),
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Reset Password',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          content: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.emailAddress,
+            onChanged: (value) => enteredEmail = value,
+            decoration: InputDecoration(
+              hintText: 'Enter your email',
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.pink.withValues(alpha: 0.3))),
+              focusedBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.pink, width: 2)),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Send',
-                style: TextStyle(color: AppColors.pink, fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, enteredEmail.trim()),
+              child: const Text('Send',
+                  style: TextStyle(color: AppColors.pink, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      },
     );
-    controller.dispose();
     if (email == null || email.isEmpty) return;
 
     try {
@@ -202,6 +199,38 @@ class _SignInScreenState extends State<SignInScreen> {
                 ),
 
                 const Spacer(flex: 2),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      "Don't have an account? ",
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.greyText,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const SignUpScreen()),
+                        );
+                      },
+                      child: const Text(
+                        'Sign Up',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.pink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
               ],
             ),
           ),

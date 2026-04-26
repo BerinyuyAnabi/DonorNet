@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../services/auth_service.dart';
+import '../main.dart' show themeNotifier;
 
 class _C {
   static const Color pink = Color(0xFFFF4D6D);
@@ -7,7 +11,6 @@ class _C {
   static const Color darkText = Color(0xFF2D2D2D);
   static const Color greyText = Color(0xFF9E9E9E);
   static const Color cardBg = Color(0xFFFFFFFF);
-  static const Color background = Color(0xFFF5F7FA);
   static const Color border = Color(0xFFEDE8EB);
 }
 
@@ -22,162 +25,366 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _authService = AuthService();
   bool _notifications = true;
   bool _locationServices = true;
-  bool _darkMode = false;
-  bool _biometric = false;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final locationPerm = await Geolocator.checkPermission();
+    final notifSettings = await FirebaseMessaging.instance.getNotificationSettings();
+
+    if (mounted) {
+      setState(() {
+        _notifications = prefs.getBool('notifications_enabled') ??
+            (notifSettings.authorizationStatus == AuthorizationStatus.authorized);
+        _locationServices =
+            locationPerm == LocationPermission.whileInUse ||
+            locationPerm == LocationPermission.always;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _toggleNotifications(bool value) async {
+    if (value) {
+      // Request permission from the OS
+      final settings = await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      final granted =
+          settings.authorizationStatus == AuthorizationStatus.authorized;
+      if (!granted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Notifications blocked by your device. Please enable them in Settings.'),
+            backgroundColor: _C.pink,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            action: SnackBarAction(
+              label: 'Open Settings',
+              textColor: Colors.white,
+              onPressed: () => Geolocator.openAppSettings(),
+            ),
+          ),
+        );
+      }
+      setState(() => _notifications = granted);
+    } else {
+      setState(() => _notifications = false);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notifications_enabled', _notifications);
+  }
+
+  Future<void> _toggleLocation(bool value) async {
+    if (value) {
+      // Check if GPS is enabled on the device
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                  'GPS is turned off. Please enable location services.'),
+              backgroundColor: _C.pink,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              action: SnackBarAction(
+                label: 'Open Settings',
+                textColor: Colors.white,
+                onPressed: () => Geolocator.openLocationSettings(),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Request permission
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                  'Location permission permanently denied. Please enable in Settings.'),
+              backgroundColor: _C.pink,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              action: SnackBarAction(
+                label: 'Open Settings',
+                textColor: Colors.white,
+                onPressed: () => Geolocator.openAppSettings(),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      final granted = permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always;
+      setState(() => _locationServices = granted);
+    } else {
+      // Direct the user to device settings to revoke permission
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'To disable location, turn it off in your device settings.'),
+            backgroundColor: _C.greyText,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            action: SnackBarAction(
+              label: 'Open Settings',
+              textColor: Colors.white,
+              onPressed: () => Geolocator.openAppSettings(),
+            ),
+          ),
+        );
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('location_enabled', _locationServices);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _C.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const ClampingScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Title
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-                child: const Text(
-                  'Settings',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    color: _C.darkText,
-                  ),
+    if (_loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: _C.pink));
+    }
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title
+            const Padding(
+              padding: EdgeInsets.fromLTRB(24, 16, 24, 20),
+              child: Text(
+                'Settings',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  color: _C.darkText,
                 ),
               ),
+            ),
 
-              // Account section
-              _sectionHeader('Account'),
-              _settingsTile(
-                icon: Icons.lock_outline_rounded,
-                title: 'Change Password',
-                subtitle: 'Update your password',
-                onTap: () {},
-              ),
-              _settingsTile(
-                icon: Icons.bloodtype_outlined,
-                title: 'Blood Type',
-                subtitle: 'A Positive (A+)',
-                onTap: () {},
-              ),
+            // Account section
+            _sectionHeader('Account'),
+            _settingsTile(
+              icon: Icons.lock_outline_rounded,
+              title: 'Change Password',
+              subtitle: 'Update your password',
+              onTap: () => _handleChangePassword(),
+            ),
 
-              const SizedBox(height: 8),
+            const SizedBox(height: 8),
 
-              // Preferences section
-              _sectionHeader('Preferences'),
-              _toggleTile(
-                icon: Icons.notifications_outlined,
-                title: 'Push Notifications',
-                subtitle: 'Blood requests, reminders',
-                value: _notifications,
-                onChanged: (v) => setState(() => _notifications = v),
-              ),
-              _toggleTile(
-                icon: Icons.location_on_outlined,
-                title: 'Location Services',
-                subtitle: 'Find nearby blood banks',
-                value: _locationServices,
-                onChanged: (v) => setState(() => _locationServices = v),
-              ),
-              _toggleTile(
-                icon: Icons.dark_mode_outlined,
-                title: 'Dark Mode',
-                subtitle: 'Switch to dark theme',
-                value: _darkMode,
-                onChanged: (v) => setState(() => _darkMode = v),
-              ),
-              _toggleTile(
-                icon: Icons.fingerprint_rounded,
-                title: 'Biometric Login',
-                subtitle: 'Use Face ID or fingerprint',
-                value: _biometric,
-                onChanged: (v) => setState(() => _biometric = v),
-              ),
+            // Preferences section
+            _sectionHeader('Preferences'),
+            _toggleTile(
+              icon: Icons.notifications_outlined,
+              title: 'Push Notifications',
+              subtitle: _notifications
+                  ? 'Enabled — blood requests, reminders'
+                  : 'Disabled',
+              value: _notifications,
+              onChanged: _toggleNotifications,
+            ),
+            _toggleTile(
+              icon: Icons.location_on_outlined,
+              title: 'Location Services',
+              subtitle: _locationServices
+                  ? 'Enabled — find nearby donors & banks'
+                  : 'Disabled',
+              value: _locationServices,
+              onChanged: _toggleLocation,
+            ),
+            _toggleTile(
+              icon: Icons.dark_mode_outlined,
+              title: 'Dark Mode',
+              subtitle: themeNotifier.isDark
+                  ? 'Dark theme active'
+                  : 'Light theme active',
+              value: themeNotifier.isDark,
+              onChanged: (v) {
+                themeNotifier.toggle();
+                setState(() {});
+              },
+            ),
 
-              const SizedBox(height: 8),
+            const SizedBox(height: 8),
 
-              // Support section
-              _sectionHeader('Support'),
-              _settingsTile(
-                icon: Icons.help_outline_rounded,
-                title: 'Help Centre',
-                subtitle: 'FAQs and support articles',
-                onTap: () {},
-              ),
-              _settingsTile(
-                icon: Icons.policy_outlined,
-                title: 'Privacy Policy',
-                subtitle: 'How we handle your data',
-                onTap: () => _showPolicySheet(context, 'Privacy Policy', _privacyText),
-              ),
-              _settingsTile(
-                icon: Icons.description_outlined,
-                title: 'Terms of Service',
-                subtitle: 'Our terms and conditions',
-                onTap: () => _showPolicySheet(context, 'Terms of Service', _termsText),
-              ),
-              _settingsTile(
-                icon: Icons.info_outline_rounded,
-                title: 'About DonorNet',
-                subtitle: 'Version 1.0.0',
-                onTap: () => _showPolicySheet(context, 'About DonorNet', _aboutText),
-              ),
+            // Support section
+            _sectionHeader('Support'),
+            _settingsTile(
+              icon: Icons.help_outline_rounded,
+              title: 'Help Centre',
+              subtitle: 'FAQs and support articles',
+              onTap: () {},
+            ),
+            _settingsTile(
+              icon: Icons.policy_outlined,
+              title: 'Privacy Policy',
+              subtitle: 'How we handle your data',
+              onTap: () =>
+                  _showPolicySheet(context, 'Privacy Policy', _privacyText),
+            ),
+            _settingsTile(
+              icon: Icons.description_outlined,
+              title: 'Terms of Service',
+              subtitle: 'Our terms and conditions',
+              onTap: () => _showPolicySheet(
+                  context, 'Terms of Service', _termsText),
+            ),
+            _settingsTile(
+              icon: Icons.info_outline_rounded,
+              title: 'About DonorNet',
+              subtitle: 'Version 1.0.0',
+              onTap: () => _showPolicySheet(
+                  context, 'About DonorNet', _aboutText),
+            ),
 
-              const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-              // Log out
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      await _authService.signOut();
-                      // Clear the entire navigation stack and go to auth landing.
-                      // pushNamedAndRemoveUntil removes ALL routes (including
-                      // HomeScreen) and places /login as the only route.
-                      if (context.mounted) {
-                        Navigator.pushNamedAndRemoveUntil(
-                          context, '/login', (route) => false,
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.logout_rounded, size: 20,
-                        color: _C.pink),
-                    label: const Text('Log Out',
-                      style: TextStyle(fontSize: 15,
-                          fontWeight: FontWeight.w600, color: _C.pink)),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: _C.pink.withValues(alpha: 0.3)),
-                      shape: RoundedRectangleBorder(
+            // Log out
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await _authService.signOut();
+                    if (context.mounted) {
+                      Navigator.pushNamedAndRemoveUntil(
+                        context, '/login', (route) => false,
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.logout_rounded,
+                      size: 20, color: _C.pink),
+                  label: const Text('Log Out',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: _C.pink)),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                        color: _C.pink.withValues(alpha: 0.3)),
+                    shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16)),
-                    ),
                   ),
                 ),
               ),
+            ),
 
-              const SizedBox(height: 100),
-            ],
-          ),
+            const SizedBox(height: 100),
+          ],
         ),
       ),
     );
+  }
+
+  Future<void> _handleChangePassword() async {
+    String enteredEmail = '';
+    final email = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+          title: const Text('Reset Password',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          content: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.emailAddress,
+            onChanged: (value) => enteredEmail = value,
+            decoration: InputDecoration(
+              hintText: 'Enter your email',
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(
+                      color: _C.pink.withValues(alpha: 0.3))),
+              focusedBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: _C.pink, width: 2)),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, enteredEmail.trim()),
+              child: Text('Send Reset Email',
+                  style: TextStyle(
+                      color: _C.pink, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      },
+    );
+    if (email == null || email.isEmpty) return;
+
+    try {
+      await _authService.resetPassword(email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Password reset email sent!'),
+            backgroundColor: const Color(0xFF4CAF50),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not send reset email: $e'),
+            backgroundColor: _C.pink,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    }
   }
 
   Widget _sectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
       child: Text(title,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: _C.greyText.withValues(alpha: 0.8),
-          letterSpacing: 0.5,
-        ),
-      ),
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: _C.greyText.withValues(alpha: 0.8),
+            letterSpacing: 0.5,
+          )),
     );
   }
 
@@ -192,16 +399,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: _C.cardBg,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _C.border.withValues(alpha: 0.5)),
+            border:
+                Border.all(color: _C.border.withValues(alpha: 0.5)),
           ),
           child: Row(
             children: [
               Container(
-                width: 40, height: 40,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: _C.pinkBg,
                   borderRadius: BorderRadius.circular(12),
@@ -214,16 +424,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(title,
-                      style: const TextStyle(fontSize: 14,
-                          fontWeight: FontWeight.w600, color: _C.darkText)),
+                        style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: _C.darkText)),
                     const SizedBox(height: 2),
                     Text(subtitle,
-                      style: const TextStyle(fontSize: 12, color: _C.greyText)),
+                        style: const TextStyle(
+                            fontSize: 12, color: _C.greyText)),
                   ],
                 ),
               ),
               Icon(Icons.chevron_right_rounded,
-                  size: 22, color: _C.greyText.withValues(alpha: 0.5)),
+                  size: 22,
+                  color: _C.greyText.withValues(alpha: 0.5)),
             ],
           ),
         ),
@@ -241,16 +455,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: _C.cardBg,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _C.border.withValues(alpha: 0.5)),
+          border:
+              Border.all(color: _C.border.withValues(alpha: 0.5)),
         ),
         child: Row(
           children: [
             Container(
-              width: 40, height: 40,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 color: _C.pinkBg,
                 borderRadius: BorderRadius.circular(12),
@@ -263,11 +480,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
-                    style: const TextStyle(fontSize: 14,
-                        fontWeight: FontWeight.w600, color: _C.darkText)),
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: _C.darkText)),
                   const SizedBox(height: 2),
                   Text(subtitle,
-                    style: const TextStyle(fontSize: 12, color: _C.greyText)),
+                      style: const TextStyle(
+                          fontSize: 12, color: _C.greyText)),
                 ],
               ),
             ),
@@ -283,7 +503,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showPolicySheet(BuildContext context, String title, String content) {
+  void _showPolicySheet(
+      BuildContext context, String title, String content) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -292,13 +513,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         height: MediaQuery.of(ctx).size.height * 0.75,
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
           children: [
             const SizedBox(height: 12),
             Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               decoration: BoxDecoration(
                 color: _C.greyText.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(2),
@@ -306,15 +529,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 16),
             Text(title,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700,
-                  color: _C.darkText)),
+                style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: _C.darkText)),
             const SizedBox(height: 16),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
                 child: Text(content,
-                  style: const TextStyle(fontSize: 14, color: _C.greyText,
-                      height: 1.7)),
+                    style: const TextStyle(
+                        fontSize: 14,
+                        color: _C.greyText,
+                        height: 1.7)),
               ),
             ),
           ],
@@ -333,10 +560,10 @@ We collect your name, email address, phone number, blood type, date of birth, an
 
 2. How We Use Your Information
 Your information is used to:
-• Match blood donors with those in need
-• Display your profile to other users seeking donors
-• Send notifications about blood requests and donation events
-• Improve the app experience
+- Match blood donors with those in need
+- Display your profile to other users seeking donors
+- Send notifications about blood requests and donation events
+- Improve the app experience
 
 3. Data Storage
 Your data is stored securely using Firebase (Google Cloud). We use industry-standard encryption for data in transit and at rest.
@@ -366,23 +593,23 @@ MEDICAL DISCLAIMER
 
 DonorNet is a CONNECTION PLATFORM ONLY. It does NOT provide medical advice, diagnosis, or treatment.
 
-• All blood donations MUST be conducted at licensed blood banks or medical facilities.
-• DonorNet does NOT verify blood types or medical eligibility of donors.
-• Users are solely responsible for ensuring they meet ALL medical requirements before donating blood.
-• Always consult a qualified healthcare professional before donating or receiving blood.
-• DonorNet is NOT responsible for any adverse health outcomes resulting from blood donation or transfusion.
+- All blood donations MUST be conducted at licensed blood banks or medical facilities.
+- DonorNet does NOT verify blood types or medical eligibility of donors.
+- Users are solely responsible for ensuring they meet ALL medical requirements before donating blood.
+- Always consult a qualified healthcare professional before donating or receiving blood.
+- DonorNet is NOT responsible for any adverse health outcomes resulting from blood donation or transfusion.
 
 3. User Responsibilities
-• Provide accurate information about your blood type and health status
-• Do not create false or misleading blood requests
-• Report any suspicious activity or fake profiles
-• Follow all local laws and medical regulations regarding blood donation
+- Provide accurate information about your blood type and health status
+- Do not create false or misleading blood requests
+- Report any suspicious activity or fake profiles
+- Follow all local laws and medical regulations regarding blood donation
 
 4. Limitation of Liability
 DonorNet provides a platform for connecting donors and recipients. We are not liable for:
-• The accuracy of user-provided blood type information
-• Medical outcomes from donations arranged through the app
-• Delays in finding donors or fulfilling requests
+- The accuracy of user-provided blood type information
+- Medical outcomes from donations arranged through the app
+- Delays in finding donors or fulfilling requests
 
 5. Account Termination
 We reserve the right to suspend or terminate accounts that violate these terms or post fraudulent requests.
@@ -392,17 +619,17 @@ For questions about these terms, reach us at support@donornet.app
 ''';
 
   static const _aboutText = '''
-DonorNet — Blood Donation Network
+DonorNet -- Blood Donation Network
 
 Version 1.0.0
 
 DonorNet connects blood donors with people who need blood, quickly and safely. Our mission is to ensure no one has to wait for the blood they need.
 
 How it works:
-• Donors register with their blood type and location
-• People in need post blood requests
-• Donors get notified when their blood type is needed nearby
-• Blood banks and donation events are listed for easy access
+- Donors register with their blood type and location
+- People in need post blood requests
+- Donors get notified when their blood type is needed nearby
+- Blood banks and donation events are listed for easy access
 
 Every donation can save up to 3 lives.
 

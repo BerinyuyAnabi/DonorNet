@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/firestore_service.dart';
 import '../services/auth_service.dart';
+import '../services/blood_compatibility.dart';
 
 class _C {
   static const Color pink = Color(0xFFFF4D6D);
@@ -35,10 +36,9 @@ class _BloodRequestScreenState extends State<BloodRequestScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final stream = _selectedFilter == 0
-        ? _firestoreService.getBloodRequests()
-        : _firestoreService.getBloodRequestsByUrgency(
-            _filters[_selectedFilter]);
+    // Always fetch all requests and filter client-side to avoid
+    // needing a composite Firestore index on (urgency, createdAt).
+    final stream = _firestoreService.getBloodRequests();
 
     return Scaffold(
       backgroundColor: _C.background,
@@ -137,7 +137,16 @@ class _BloodRequestScreenState extends State<BloodRequestScreen> {
                   );
                 }
 
-                final docs = snapshot.data?.docs ?? [];
+                var docs = snapshot.data?.docs ?? [];
+
+                // Apply client-side filter
+                if (_selectedFilter != 0) {
+                  final filterValue = _filters[_selectedFilter];
+                  docs = docs.where((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    return data['urgency'] == filterValue;
+                  }).toList();
+                }
 
                 // Empty state
                 if (docs.isEmpty) {
@@ -385,25 +394,28 @@ class _BloodRequestScreenState extends State<BloodRequestScreen> {
               Icon(Icons.location_on_outlined,
                   size: 14, color: _C.greyText.withValues(alpha: 0.7)),
               const SizedBox(width: 4),
-              Text(
-                data['location'] ?? '',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _C.greyText.withValues(alpha: 0.8),
+              Flexible(
+                child: Text(
+                  data['location'] ?? '',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _C.greyText.withValues(alpha: 0.8),
+                  ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 10),
               Icon(Icons.water_drop_outlined,
                   size: 14, color: _C.greyText.withValues(alpha: 0.7)),
               const SizedBox(width: 4),
               Text(
-                '${data['unitsNeeded'] ?? 0} units needed',
+                '${data['unitsNeeded'] ?? 0} units',
                 style: TextStyle(
                   fontSize: 12,
                   color: _C.greyText.withValues(alpha: 0.8),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 10),
               Text(
                 _timeAgo(data['createdAt'] as Timestamp?),
                 style: TextStyle(
@@ -414,45 +426,491 @@ class _BloodRequestScreenState extends State<BloodRequestScreen> {
             ],
           ),
           if (urgency != 'Fulfilled') ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 40,
-              child: ElevatedButton(
-                onPressed: () async {
-                  await _firestoreService.fulfillBloodRequest(docId);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Thank you for responding!'),
-                        backgroundColor: _C.green,
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      urgency == 'Urgent' ? _C.pink : _C.pinkLight,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+            // Don't show respond button to the person who created the request
+            if (data['userId'] == FirebaseAuth.instance.currentUser?.uid) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE3F2FD),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(
-                  urgency == 'Urgent' ? 'Respond Now' : 'I Can Help',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded,
+                        size: 18, color: Color(0xFF5BA8E0)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'This is your request. Waiting for a donor to respond.',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF5BA8E0)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ]
+            // Show who responded if already has a donor
+            else if (data['respondedByName'] != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _C.greenBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_rounded,
+                        size: 18, color: _C.green),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${data['respondedByName']} (${data['respondedByBloodType']}) — arriving ${data['arrivalTime']}',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _C.green),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: ElevatedButton(
+                  onPressed: () =>
+                      _showRespondSheet(context, docId, data),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        urgency == 'Urgent' ? _C.pink : _C.pinkLight,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    urgency == 'Urgent' ? 'Respond Now' : 'I Can Help',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ],
+        ],
+      ),
+    );
+  }
+
+  void _showRespondSheet(
+      BuildContext context, String docId, Map<String, dynamic> requestData) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final requestedType = requestData['bloodType'] ?? '';
+    TimeOfDay selectedTime = TimeOfDay.now();
+    bool loading = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return FutureBuilder<Map<String, dynamic>?>(
+              future: _authService.getUserProfile(user.uid),
+              builder: (ctx, profileSnapshot) {
+                if (profileSnapshot.connectionState ==
+                    ConnectionState.waiting) {
+                  return Container(
+                    height: 200,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(24)),
+                    ),
+                    child: const Center(
+                      child: CircularProgressIndicator(color: _C.pink),
+                    ),
+                  );
+                }
+
+                final profile = profileSnapshot.data;
+                final donorName = profile?['name'] ?? 'Anonymous';
+                final donorBloodType = profile?['bloodType'] ?? '';
+                final donorPhone = profile?['phone'] ?? '';
+                final isCompatible = BloodCompatibility.canDonate(
+                    from: donorBloodType, to: requestedType);
+
+                return Container(
+                  padding: EdgeInsets.fromLTRB(
+                      20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(24)),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: _C.greyText.withValues(alpha: 0.3),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text(
+                          'Respond to Request',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: _C.darkText,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Request summary
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: _C.pinkBg,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: _C.pink,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    requestedType,
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      requestData['name'] ?? 'Someone',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: _C.darkText,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${requestData['hospital']} · ${requestData['unitsNeeded'] ?? 1} units',
+                                      style: const TextStyle(
+                                          fontSize: 12, color: _C.greyText),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        // Compatibility check
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: isCompatible ? _C.greenBg : _C.redBg,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isCompatible
+                                    ? Icons.check_circle_rounded
+                                    : Icons.cancel_rounded,
+                                color:
+                                    isCompatible ? _C.green : _C.red,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isCompatible
+                                          ? 'You are compatible!'
+                                          : 'Not compatible',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: isCompatible
+                                            ? _C.green
+                                            : _C.red,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      donorBloodType.isEmpty
+                                          ? 'Please set your blood type in your profile first.'
+                                          : isCompatible
+                                              ? 'Your blood type ($donorBloodType) can donate to $requestedType.'
+                                              : 'Your blood type ($donorBloodType) cannot donate to $requestedType.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isCompatible
+                                            ? _C.green
+                                            : _C.red,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        if (isCompatible) ...[
+                          const SizedBox(height: 20),
+
+                          // Your info
+                          const Text('Your Details',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: _C.darkText)),
+                          const SizedBox(height: 10),
+                          _respondInfoRow(
+                              Icons.person_outline, 'Name', donorName),
+                          const SizedBox(height: 8),
+                          _respondInfoRow(Icons.bloodtype_outlined,
+                              'Blood Type', donorBloodType),
+                          const SizedBox(height: 8),
+                          _respondInfoRow(
+                            Icons.phone_outlined,
+                            'Phone',
+                            donorPhone.isNotEmpty
+                                ? donorPhone
+                                : 'Not set — add in Profile',
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          // Arrival time picker
+                          const Text('When can you arrive?',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: _C.darkText)),
+                          const SizedBox(height: 10),
+                          GestureDetector(
+                            onTap: () async {
+                              final picked = await showTimePicker(
+                                context: ctx,
+                                initialTime: selectedTime,
+                                helpText: 'Select your arrival time',
+                              );
+                              if (picked != null) {
+                                setSheetState(
+                                    () => selectedTime = picked);
+                              }
+                            },
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 16),
+                              decoration: BoxDecoration(
+                                color: _C.cardBg,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color:
+                                      _C.greyText.withValues(alpha: 0.2),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.access_time_rounded,
+                                      color: _C.pink, size: 22),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    selectedTime.format(ctx),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: _C.darkText,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    'Tap to change',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: _C.greyText
+                                          .withValues(alpha: 0.6),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          // Submit
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: ElevatedButton(
+                              onPressed: loading
+                                  ? null
+                                  : () async {
+                                      if (donorPhone.isEmpty) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: const Text(
+                                                'Please add your phone number in your profile first.'),
+                                            backgroundColor: _C.pink,
+                                            behavior:
+                                                SnackBarBehavior.floating,
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        12)),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      setSheetState(
+                                          () => loading = true);
+
+                                      final now = DateTime.now();
+                                      final arrivalDateTime = DateTime(
+                                        now.year,
+                                        now.month,
+                                        now.day,
+                                        selectedTime.hour,
+                                        selectedTime.minute,
+                                      );
+
+                                      await _firestoreService
+                                          .respondToBloodRequest(
+                                        requestId: docId,
+                                        donorId: user.uid,
+                                        donorName: donorName,
+                                        donorBloodType: donorBloodType,
+                                        donorPhone: donorPhone,
+                                        arrivalTime: arrivalDateTime,
+                                      );
+
+                                      if (ctx.mounted) {
+                                        Navigator.pop(ctx);
+                                      }
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: const Text(
+                                                'Thank you! The requester has been notified.'),
+                                            backgroundColor: _C.green,
+                                            behavior:
+                                                SnackBarBehavior.floating,
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        12)),
+                                          ),
+                                        );
+                                      }
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _C.pink,
+                                foregroundColor: Colors.white,
+                                elevation: 4,
+                                shadowColor:
+                                    _C.pink.withValues(alpha: 0.35),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(26),
+                                ),
+                              ),
+                              child: loading
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                          strokeWidth: 2.5),
+                                    )
+                                  : const Text('Confirm & Notify Requester',
+                                      style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _respondInfoRow(IconData icon, String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _C.cardBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _C.greyText.withValues(alpha: 0.12)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: _C.pink),
+          const SizedBox(width: 10),
+          Text(label,
+              style: const TextStyle(fontSize: 12, color: _C.greyText)),
+          const Spacer(),
+          Text(value,
+              style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: _C.darkText)),
         ],
       ),
     );
